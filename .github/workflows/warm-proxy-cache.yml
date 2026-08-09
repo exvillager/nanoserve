@@ -1,0 +1,49 @@
+name: Warm Go proxy cache
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Tag to warm on the Go module proxy (e.g. v0.2.9)"
+        required: true
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  warm-cache:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            version="${GITHUB_REF#refs/tags/}"
+          else
+            version="${{ inputs.version }}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Warm proxy.golang.org
+        run: |
+          version="${{ steps.resolve.outputs.version }}"
+          module="github.com/${{ github.repository }}"
+          url="https://proxy.golang.org/${module}/@v/${version}.info"
+          echo "Fetching $url"
+          response="$(curl -sf "$url")"
+          echo "$response"
+          echo "$response" | grep -q "\"Version\":\"${version}\"" || {
+            echo "proxy did not return the expected version ($version)"
+            exit 1
+          }
+
+      - name: Warm pkg.go.dev
+        continue-on-error: true
+        run: |
+          version="${{ steps.resolve.outputs.version }}"
+          module="github.com/${{ github.repository }}"
+          curl -sf "https://pkg.go.dev/${module}@${version}" > /dev/null
