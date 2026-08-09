@@ -6,6 +6,8 @@ import (
 	"sync"
 )
 
+const Version = "v0.2.9"
+
 type HandlerFunction func(*Context) error
 
 type ErrorHandlerFunc func(*Context, error)
