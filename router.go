@@ -38,7 +38,7 @@ type Node struct {
 	isEndOfWord bool
 	handlers    map[string]HandlerFunction
 	middlewares []HandlerFunction
-	params map[string] string
+	params      map[string]string
 }
 
 func newNode() *Node {
@@ -46,7 +46,7 @@ func newNode() *Node {
 		children:    make(map[string]*Node),
 		handlers:    make(map[string]HandlerFunction),
 		middlewares: []HandlerFunction{},
-		params: make(map[string]string),
+		params:      make(map[string]string),
 	}
 }
 
@@ -158,10 +158,10 @@ func (r *TrieRouter) Search(method string, path string) *RouteMatch {
 		} else if child := node.children[":"]; child != nil {
 			node = child
 			param := node.params[method]
-			if param == ""{
+			if param == "" {
 				param = node.params["ALL"]
 			}
-			if param != ""{
+			if param != "" {
 				params = append(params, Param{Key: param, Value: element})
 			}
 			if wildCardMatch != nil && len(wildCardMatch.middlewares) > 0 {
