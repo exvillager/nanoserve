@@ -32,12 +32,13 @@ type RouteMatch struct {
 	Params  Params
 }
 
+// Our Node
 type Node struct {
 	children    map[string]*Node
 	isEndOfWord bool
 	handlers    map[string]HandlerFunction
 	middlewares []HandlerFunction
-	paramName   string
+	params map[string] string
 }
 
 func newNode() *Node {
@@ -45,7 +46,7 @@ func newNode() *Node {
 		children:    make(map[string]*Node),
 		handlers:    make(map[string]HandlerFunction),
 		middlewares: []HandlerFunction{},
-		paramName:   "",
+		params: make(map[string]string),
 	}
 }
 
@@ -121,7 +122,7 @@ func (r *TrieRouter) Insert(method string, path string, handler HandlerFunction)
 
 		node = node.children[key]
 		if cleanParam != "" {
-			node.paramName = cleanParam
+			node.params[method] = cleanParam
 		}
 	}
 	node.isEndOfWord = true
@@ -156,8 +157,12 @@ func (r *TrieRouter) Search(method string, path string) *RouteMatch {
 			node = child
 		} else if child := node.children[":"]; child != nil {
 			node = child
-			if node.paramName != "" {
-				params = append(params, Param{Key: node.paramName, Value: element})
+			param := node.params[method]
+			if param == ""{
+				param = node.params["ALL"]
+			}
+			if param != ""{
+				params = append(params, Param{Key: param, Value: element})
 			}
 			if wildCardMatch != nil && len(wildCardMatch.middlewares) > 0 {
 				if !copied {
@@ -236,8 +241,12 @@ func (r *TrieRouter) Find(method string, path string) *RouteMatch {
 				}
 			} else if child := node.children[":"]; child != nil {
 				node = child
-				if node.paramName != "" {
-					params = append(params, Param{Key: node.paramName, Value: segment})
+				param := node.params[method]
+				if param == "" {
+					param = node.params["ALL"]
+				}
+				if param != "" {
+					params = append(params, Param{Key: param, Value: segment})
 				}
 				if wildCardMatch != nil && len(wildCardMatch.middlewares) > 0 {
 					if !copied {

@@ -193,6 +193,43 @@ func TestParamFind(t *testing.T) {
 	runParamLookupTests(t, r.Find, r)
 }
 
+// runParamCollisionTests guards against the bug where two methods sharing the
+// same ":" node (e.g. GET /users/:id and POST /users/:name) overwrote each
+// other's param name, so a GET lookup reported the param under "name" instead
+// of "id".
+func runParamCollisionTests(t *testing.T, lookup lookupFn, r *TrieRouter) {
+	t.Helper()
+
+	r.Insert("GET", "/users/:id", dummyHandler)
+	r.Insert("POST", "/users/:name", dummyHandler)
+
+	getMatch := lookup("GET", "/users/42")
+	if len(getMatch.Handler) == 0 {
+		t.Fatal("GET /users/42: expected a handler, got none")
+	}
+	if got := getMatch.Params.Get("id"); got != "42" {
+		t.Fatalf("GET /users/42: expected id=42, got id=%q (params: %+v)", got, getMatch.Params)
+	}
+
+	postMatch := lookup("POST", "/users/alice")
+	if len(postMatch.Handler) == 0 {
+		t.Fatal("POST /users/alice: expected a handler, got none")
+	}
+	if got := postMatch.Params.Get("name"); got != "alice" {
+		t.Fatalf("POST /users/alice: expected name=alice, got name=%q (params: %+v)", got, postMatch.Params)
+	}
+}
+
+func TestParamCollisionSearch(t *testing.T) {
+	r := NewTrieRouter()
+	runParamCollisionTests(t, r.Search, r)
+}
+
+func TestParamCollisionFind(t *testing.T) {
+	r := NewTrieRouter()
+	runParamCollisionTests(t, r.Find, r)
+}
+
 func TestSearch(t *testing.T) {
 	r := NewTrieRouter()
 	runLookupTests(t, r.Search, r)
