@@ -1,24 +1,10 @@
 # nanoServe
 
-nanoServe is a lightweight HTTP router written in Go. It provides a trie-based routing engine with support for middleware, multiple HTTP methods, and flexible route handling.
-
-The goal of nanoServe is to remain simple, fast, and easy to extend while maintaining clean architectural separation between routing and execution.
+nanoServe is a tiny, fast web framework for Go — think **Fiber**, but smaller. It bundles a trie-based router, a request `Context` (JSON/text/HTML responses, params, query, cookies, body binding), and middleware chaining, all with zero third-party dependencies.
 
 ---
 
-## Features
-
-* Trie-based path matching
-* Support for all standard HTTP methods
-* Global and path-specific middleware
-* Variadic handler support
-* Implements `http.Handler` interface
-* Minimal and extensible core design
-* Inbuilt param parser inside `Trie` router
-
----
-
-## Installation
+## Install
 
 ```bash
 go get github.com/libsib/nanoserve
@@ -31,141 +17,157 @@ go get github.com/libsib/nanoserve
 ```go
 package main
 
-import (
-	"net/http"
-	"github.com/libsib/nanoserve"
-)
+import "github.com/libsib/nanoserve"
 
 func main() {
-	r := nanoserve.New()
+	app := nanoserve.New()
 
-	globalMiddleware := func(c *nanoserve.Context) error {
-		fmt.println("path: ", c.Request.URL.Path)
-		c.Next() // it's necessary if you wants to invoke next handlers
-		return nil
-	}
-	r.Use(globalMiddleware)
-	r.GET("/hello", func(c *nanoserve.Context) error {
-		c.Text("Hello World",200) // return c.Text("Hello World",200)
-		// OR
-		return nil
+	app.Use(func(c *nanoserve.Context) error {
+		println("request:", c.Request.URL.Path)
+		return c.Next()
 	})
 
-	r.Run(":8080")
+	app.GET("/hello/:name", func(c *nanoserve.Context) error {
+		return c.JSON(map[string]string{"hello": c.Param("name")})
+	})
+
+	app.Run(":8080")
 }
 ```
 
-Visit [http://localhost:8080/hello](http://localhost:8080/hello)
+Visit [http://localhost:8080/hello/world](http://localhost:8080/hello/world)
 
 ---
 
-## Supported HTTP Methods
+## Routing
 
-nanoServe supports all standard HTTP methods:
-
-* GET
-* POST
-* PUT
-* PATCH
-* DELETE
-* HEAD
-* OPTIONS
-* CONNECT
-* TRACE
-
-You can also use:
+All standard HTTP methods are supported:
 
 ```go
-r.Handle(method, path, handlers...)
-r.ANY(path, handlers...)
+app.GET(path, handlers...)
+app.POST(path, handlers...)
+app.PUT(path, handlers...)
+app.PATCH(path, handlers...)
+app.DELETE(path, handlers...)
+app.HEAD(path, handlers...)
+app.OPTIONS(path, handlers...)
+app.CONNECT(path, handlers...)
+app.TRACE(path, handlers...)
+
+app.Handle(method, path, handlers...) // any custom method
+app.ANY(path, handlers...)            // matches every method
 ```
+
+Route params use a `:` prefix and are read back with `c.Param`:
+
+```go
+app.GET("/users/:id", func(c *nanoserve.Context) error {
+	return c.Text("user " + c.Param("id"))
+})
+```
+
+A trailing `/*` matches everything after the prefix (used by `Static` and `Sub` below).
 
 ---
 
 ## Middleware
 
-### Global Middleware
+A handler can `return c.Next()` to continue the chain, or stop it early with `c.Abort()` / `c.AbortWithStatus(code)`.
 
 ```go
-r.Use(func(c *nanoserve.Context) {
-	println("global middleware")
+// global — runs on every request
+app.Use(func(c *nanoserve.Context) error {
+	return c.Next()
 })
-```
 
-### Path-Specific Middleware
-
-```go
-r.Use("/api", func(c *nanoserve.Context) error {
-	println("api middleware")
-	return nil
+// scoped to a path prefix
+app.Use("/api", func(c *nanoserve.Context) error {
+	return c.Next()
 })
+
+// per-route — pass extra handlers before the final one
+app.GET("/admin", authMiddleware, adminHandler)
 ```
 
-Middleware executes in the order they are registered.
+Middleware runs in registration order, global middleware first.
 
 ---
 
-## Route Parameters
+## Context
 
-nanoServe supports parameterized routes using `:` prefix.
-
-Example:
+The `Context` passed to every handler wraps the request and response:
 
 ```go
-r.GET("/users/:id", handler)
+c.Param("id")          // route param
+c.Query("q")           // URL query param
+c.GetHeader("X-Token") // request header
+c.SetHeader("X-Foo", "bar")
+c.Set("user", u)       // stash a value for this request
+c.Get("user")          // retrieve it later in the chain
+
+c.Text("plain text")
+c.JSON(data)
+c.HTML("<h1>hi</h1>")
+c.Send(data, "application/octet-stream")
+c.NoContent(204)
+
+c.Bind(&payload)       // decode JSON body
+c.BodyBytes()          // raw body, safe to call alongside Bind
+
+c.GetCookie("session")
+c.SetCookie(http.Cookie{Name: "session", Value: "..."})
+c.Redirect("/login", 302)
+c.IP()                 // best-effort client IP (X-Forwarded-For / X-Real-IP / RemoteAddr)
+
+c.Status(200).JSON(data) // chain a status code before writing
 ```
 
-Parameter extraction logic is handled by the trie router.
+Handlers return an `error`; a non-nil error is passed to `app.ErrorHandler` (which defaults to a `500` response, and can be overridden).
 
 ---
 
-## Architecture Overview
+## Static Files
 
-nanoServe follows a layered architecture:
-
-1. HTTP Layer – Implements `http.Handler`
-2. Router Layer – Manages route registration
-3. Trie Layer – Handles path matching
-4. Middleware Layer – Collects and executes middleware
-
-This separation ensures maintainability and extensibility.
-
----
-
-## Project Structure
-
-```
-nanoserve/
-├── router.go
-├── trie.go
-├── server.go
-├── middleware.go
-├── context.go (planned)
+```go
+app.Static("/assets", "./public")
 ```
 
 ---
 
-## Roadmap
+## Sub-routers
 
-* Context abstraction
-* Improved middleware chaining
-* Route groups
-* Subrouters
-* 405 Method Not Allowed support
-* Automatic OPTIONS handling
-* Performance benchmarking
+Mount one `NanoServe` instance inside another under a prefix:
+
+```go
+api := nanoserve.New()
+api.GET("/users", listUsers)
+
+app := nanoserve.New()
+app.Sub("/api/*", api)
+```
+
+---
+
+## Running
+
+```go
+app.Run(":8080") // shorthand for http.ListenAndServe(addr, app)
+```
+
+`NanoServe` also implements `http.Handler` directly, so it drops into any existing `net/http` server:
+
+```go
+http.ListenAndServe(":8080", app)
+```
 
 ---
 
 ## Philosophy
 
-nanoServe aims to:
-
-* Keep the core minimal
-* Avoid unnecessary abstractions
-* Maintain clean separation of concerns
-* Stay idiomatic to Go
-* Lazy work to keep nanoServe fast
+* Small core, no dependencies
+* Idiomatic Go — no magic, no reflection-heavy DSL
+* Fast by default: trie routing, pooled request contexts
+* Easy to read end to end in one sitting
 
 ---
 
@@ -177,4 +179,4 @@ MIT License
 
 ## Contributing
 
-Contributions are welcome. Feel
+Contributions are welcome. Feel free to open an issue or a PR.
