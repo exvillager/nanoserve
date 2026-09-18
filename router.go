@@ -34,11 +34,13 @@ type RouteMatch struct {
 
 // Our Node
 type Node struct {
-	children    map[string]*Node
-	isEndOfWord bool
-	handlers    map[string]HandlerFunction
-	middlewares []HandlerFunction
-	params      map[string]string
+	children      map[string]*Node
+	isEndOfWord   bool
+	handlers      map[string]HandlerFunction
+	middlewares   []HandlerFunction
+	params        map[string]string
+	paramChild    *Node
+	wildCardChild *Node
 }
 
 func newNode() *Node {
@@ -47,6 +49,19 @@ func newNode() *Node {
 		handlers:    make(map[string]HandlerFunction),
 		middlewares: []HandlerFunction{},
 		params:      make(map[string]string),
+	}
+}
+
+// addChild creates the child for key and caches it on paramChild or wildCardChild
+// so Find can reach them without a map lookup.
+func (n *Node) addChild(key string) {
+	child := newNode()
+	n.children[key] = child
+	switch key {
+	case ":":
+		n.paramChild = child
+	case "*":
+		n.wildCardChild = child
 	}
 }
 
@@ -86,7 +101,7 @@ func (r *TrieRouter) AddMiddleware(path string, handlers ...HandlerFunction) {
 		}
 
 		if node.children[key] == nil {
-			node.children[key] = newNode()
+			node.addChild(key)
 		}
 		node = node.children[key]
 	}
@@ -117,9 +132,8 @@ func (r *TrieRouter) Insert(method string, path string, handler HandlerFunction)
 		}
 
 		if node.children[key] == nil {
-			node.children[key] = newNode()
+			node.addChild(key)
 		}
-
 		node = node.children[key]
 		if cleanParam != "" {
 			node.params[method] = cleanParam
@@ -129,7 +143,95 @@ func (r *TrieRouter) Insert(method string, path string, handler HandlerFunction)
 	node.handlers[method] = handler
 }
 
-// deprecated. 
+func (r *TrieRouter) Find(method string, path string) *RouteMatch {
+	// Path - /user/me
+	node := r.root
+
+	var collected []HandlerFunction
+	collected = r.globalMiddlewares
+	copied := false
+
+	var params Params
+
+	start := 0
+	for i := 0; i <= len(path); i++ {
+		// range of /user/me
+		if i == len(path) || path[i] == '/' {
+			//
+			if start == i {
+				start = i + 1
+				continue
+			}
+			// strip the seg
+			// like "/user/me" , start=0, and when path[i]== / second time at /me
+			// so we do path[0:5] which will return user, thats what we need.
+			segment := path[start:i]
+			next := node.children[segment]
+			if next != nil {
+				if node.wildCardChild != nil && len(node.wildCardChild.middlewares) > 0 {
+					if !copied {
+						collected = append([]HandlerFunction{}, collected...)
+						copied = true
+					}
+					collected = append(collected, node.wildCardChild.middlewares...)
+				}
+				node = next
+			} else if node.paramChild != nil {
+				if node.wildCardChild != nil && len(node.wildCardChild.middlewares) > 0 {
+					if !copied {
+						collected = append([]HandlerFunction{}, collected...)
+						copied = true
+					}
+					collected = append(collected, node.wildCardChild.middlewares...)
+				}
+				node = node.paramChild
+
+				param := node.params[method]
+				if param == "" {
+					param = node.params["ALL"]
+				}
+				if param != "" {
+					params = append(params, Param{Key: param, Value: segment})
+				}
+			} else if node.wildCardChild != nil {
+				node = node.wildCardChild
+				break
+			} else {
+				return &RouteMatch{Params: params, Handler: collected}
+			}
+
+			start = i + 1
+		}
+	}
+
+	if len(node.middlewares) > 0 {
+		if !copied {
+			collected = append([]HandlerFunction{}, collected...)
+			copied = true
+		}
+		collected = append(collected, node.middlewares...)
+	}
+	// first check for given method
+	if handler := node.handlers[method]; handler != nil {
+		if !copied {
+			collected = append([]HandlerFunction{}, collected...)
+		}
+		collected = append(collected, handler)
+		return &RouteMatch{Params: params, Handler: collected}
+	}
+	// if not then "ALL"
+	if handler := node.handlers["ALL"]; handler != nil {
+		if !copied {
+			collected = append([]HandlerFunction{}, collected...)
+		}
+		collected = append(collected, handler)
+		return &RouteMatch{Params: params, Handler: collected}
+	}
+
+	return &RouteMatch{Params: params, Handler: collected}
+}
+
+// deprecated.
 // use find method for better performance.
 func (r *TrieRouter) Search(method string, path string) *RouteMatch {
 	node := r.root
@@ -178,94 +280,6 @@ func (r *TrieRouter) Search(method string, path string) *RouteMatch {
 			return &RouteMatch{Params: params, Handler: collected}
 		}
 	}
-	if len(node.middlewares) > 0 {
-		if !copied {
-			collected = append([]HandlerFunction{}, collected...)
-			copied = true
-		}
-		collected = append(collected, node.middlewares...)
-	}
-	// first check for given method
-	if handler := node.handlers[method]; handler != nil {
-		if !copied {
-			collected = append([]HandlerFunction{}, collected...)
-		}
-		collected = append(collected, handler)
-		return &RouteMatch{Params: params, Handler: collected}
-	}
-	// if not then "ALL"
-	if handler := node.handlers["ALL"]; handler != nil {
-		if !copied {
-			collected = append([]HandlerFunction{}, collected...)
-		}
-		collected = append(collected, handler)
-		return &RouteMatch{Params: params, Handler: collected}
-	}
-
-	return &RouteMatch{Params: params, Handler: collected}
-}
-
-func (r *TrieRouter) Find(method string, path string) *RouteMatch {
-	// Path - /user/me
-	node := r.root
-
-	var collected []HandlerFunction
-	collected = r.globalMiddlewares
-	copied := false
-
-	var params Params
-
-	start := 0
-	for i := 0; i <= len(path); i++ {
-		// range of /user/me
-		if i == len(path) || path[i] == '/' {
-			//
-			if start == i {
-				start = i + 1
-				continue
-			}
-			// strip the seg
-			// like "/user/me" , start=0, and when path[i]== / second time at /me
-			// so we do path[0:5] which will return user, thats what we need.
-			segment := path[start:i]
-			wildCardMatch := node.children["*"]
-
-			if child := node.children[segment]; child != nil {
-				node = child
-				if wildCardMatch != nil && len(wildCardMatch.middlewares) > 0 {
-					if !copied {
-						collected = append([]HandlerFunction{}, collected...)
-						copied = true
-					}
-					collected = append(collected, wildCardMatch.middlewares...)
-				}
-			} else if child := node.children[":"]; child != nil {
-				node = child
-				param := node.params[method]
-				if param == "" {
-					param = node.params["ALL"]
-				}
-				if param != "" {
-					params = append(params, Param{Key: param, Value: segment})
-				}
-				if wildCardMatch != nil && len(wildCardMatch.middlewares) > 0 {
-					if !copied {
-						collected = append([]HandlerFunction{}, collected...)
-						copied = true
-					}
-					collected = append(collected, wildCardMatch.middlewares...)
-				}
-			} else if child := node.children["*"]; child != nil {
-				node = child
-				break
-			} else {
-				return &RouteMatch{Params: params, Handler: collected}
-			}
-
-			start = i + 1
-		}
-	}
-
 	if len(node.middlewares) > 0 {
 		if !copied {
 			collected = append([]HandlerFunction{}, collected...)
