@@ -2,6 +2,8 @@ package nanoserve
 
 import (
 	"fmt"
+	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -246,4 +248,76 @@ func TestMiddlewaresSearch(t *testing.T) {
 
 func TestMiddlewaresFind(t *testing.T) {
 	testMiddlewares(t, func(r *TrieRouter) lookupFn { return r.Find })
+}
+
+// sameChain reports whether two handler chains hold the same functions in the
+// same order.
+func sameChain(a, b []HandlerFunction) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if reflect.ValueOf(a[i]).Pointer() != reflect.ValueOf(b[i]).Pointer() {
+			return false
+		}
+	}
+	return true
+}
+
+// TestStaticCache checks that static paths are served from the cache and that
+// the cached result matches what the trie walk (Search) returns, including
+// middleware registered after the routes.
+func TestStaticCache(t *testing.T) {
+	r := NewTrieRouter()
+	getUsers := func(c *Context) error { return nil }
+	postUsers := func(c *Context) error { return nil }
+	allHealth := func(c *Context) error { return nil }
+	apiMw := func(c *Context) error { return c.Next() }
+	globalMw := func(c *Context) error { return c.Next() }
+
+	r.Insert("GET", "/api/users", getUsers)
+	r.Insert("POST", "/api/users", postUsers)
+	r.Insert("GET", "/api/users/:id", dummyHandler)
+	r.Insert("ALL", "/health", allHealth)
+	r.AddMiddleware("/api/*", apiMw)
+	r.AddMiddleware("/", globalMw)
+
+	cases := []struct {
+		method, path string
+		want         []HandlerFunction
+	}{
+		{"GET", "/api/users", []HandlerFunction{globalMw, apiMw, getUsers}},
+		{"POST", "/api/users", []HandlerFunction{globalMw, apiMw, postUsers}},
+		{"GET", "/health", []HandlerFunction{globalMw, allHealth}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			if r.getStaticMapFor(tc.method)[tc.path] == nil {
+				t.Fatal("expected a static cache entry, got none")
+			}
+			found := r.Find(tc.method, tc.path)
+			if !sameChain(found.Handler, tc.want) {
+				t.Fatalf("Find: expected %d handlers in order, got %d", len(tc.want), len(found.Handler))
+			}
+			if !sameChain(found.Handler, r.Search(tc.method, tc.path).Handler) {
+				t.Fatal("Find (cache) and Search (trie) returned different chains")
+			}
+		})
+	}
+
+	t.Run("cache and trie agree for a method without a route", func(t *testing.T) {
+		if !sameChain(r.Find("PUT", "/api/users").Handler, r.Search("PUT", "/api/users").Handler) {
+			t.Fatal("Find and Search disagree on a cache miss")
+		}
+	})
+
+	t.Run("param paths are not cached", func(t *testing.T) {
+		if slices.Contains(r.staticPaths, "/api/users/:id") {
+			t.Fatalf("param path should not be cached, staticPaths=%v", r.staticPaths)
+		}
+		if got := r.Find("GET", "/api/users/42").Params.Get("id"); got != "42" {
+			t.Fatalf("expected id=42, got %q", got)
+		}
+	})
 }
