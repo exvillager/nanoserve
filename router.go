@@ -1,6 +1,7 @@
 package nanoserve
 
 import (
+	"slices"
 	"strings"
 )
 
@@ -68,6 +69,63 @@ func (n *Node) addChild(key string) {
 type TrieRouter struct {
 	root              *Node
 	globalMiddlewares []HandlerFunction
+	getStatic         map[string]*RouteMatch
+	postStatic        map[string]*RouteMatch
+	putStatic         map[string]*RouteMatch
+	deleteStatic      map[string]*RouteMatch
+	otherStatic       map[string]map[string]*RouteMatch
+
+	staticPaths []string
+}
+
+func (r *TrieRouter) getStaticMapFor(method string) map[string]*RouteMatch {
+	switch method {
+	case "GET":
+		return r.getStatic
+	case "POST":
+		return r.postStatic
+	case "PUT":
+		return r.putStatic
+	case "DELETE":
+		return r.deleteStatic
+	default:
+		return r.otherStatic[method]
+	}
+}
+
+func (r *TrieRouter) getOrCreateStaticMapFor(method string) map[string]*RouteMatch {
+	static := r.getStaticMapFor(method)
+	if static != nil {
+		return static
+	}
+	newMap := make(map[string]*RouteMatch)
+	r.otherStatic[method] = newMap
+	return newMap
+}
+
+func (r *TrieRouter) arrangeHandlers(path string) {
+	methods := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "ALL"}
+
+	for method := range r.otherStatic {
+		if !slices.Contains(methods, method) {
+			methods = append(methods, method)
+		}
+	}
+
+	for _, mthd := range methods {
+		searchedResult := r.Search(mthd, path)
+		correctMap := r.getOrCreateStaticMapFor(mthd)
+		if len(searchedResult.Handler) > 0 {
+			correctMap[path] = searchedResult
+		}
+	}
+
+}
+
+func (r *TrieRouter) rebuildStatic() {
+	for _, v := range r.staticPaths {
+		r.arrangeHandlers(v)
+	}
 }
 
 func NewTrieRouter() *TrieRouter {
@@ -77,6 +135,12 @@ func NewTrieRouter() *TrieRouter {
 			handlers:    make(map[string]HandlerFunction),
 			middlewares: []HandlerFunction{},
 		},
+		getStatic:    make(map[string]*RouteMatch),
+		postStatic:   make(map[string]*RouteMatch),
+		putStatic:    make(map[string]*RouteMatch),
+		deleteStatic: make(map[string]*RouteMatch),
+		otherStatic:  make(map[string]map[string]*RouteMatch),
+		staticPaths:  make([]string, 0),
 	}
 }
 
@@ -85,6 +149,7 @@ func (r *TrieRouter) AddMiddleware(path string, handlers ...HandlerFunction) {
 
 	if path == "/" {
 		r.globalMiddlewares = append(r.globalMiddlewares, handlers...)
+		r.rebuildStatic()
 		return
 	}
 
@@ -107,14 +172,28 @@ func (r *TrieRouter) AddMiddleware(path string, handlers ...HandlerFunction) {
 	}
 
 	node.middlewares = append(node.middlewares, handlers...)
+	r.rebuildStatic()
 }
 
 func (r *TrieRouter) Insert(method string, path string, handler HandlerFunction) {
+	isStatic := !strings.Contains(path, ":") && !strings.Contains(path, "*")
+	if isStatic {
+		if !slices.Contains(r.staticPaths, path) {
+			r.staticPaths = append(r.staticPaths, path)
+		}
+	}
+	newMethod := r.getStaticMapFor(method) == nil
+	r.getOrCreateStaticMapFor(method)
+
 	node := r.root
 
 	if path == "/" {
 		node.isEndOfWord = true
 		node.handlers[method] = handler
+		if newMethod {
+			// rebuild static cache
+			r.rebuildStatic()
+		}
 		return
 	}
 
@@ -141,9 +220,25 @@ func (r *TrieRouter) Insert(method string, path string, handler HandlerFunction)
 	}
 	node.isEndOfWord = true
 	node.handlers[method] = handler
+
+	if newMethod {
+		// rbuild static
+		r.rebuildStatic()
+	}
+	if isStatic {
+		// re arrange handlers
+		r.arrangeHandlers(path)
+	}
 }
 
 func (r *TrieRouter) Find(method string, path string) *RouteMatch {
+	staticmap := r.getStaticMapFor(method)
+	if staticmap != nil {
+		cachedresult := staticmap[path]
+		if cachedresult != nil {
+			return cachedresult
+		}
+	}
 	// Path - /user/me
 	node := r.root
 
