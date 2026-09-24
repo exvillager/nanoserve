@@ -306,6 +306,12 @@ func TestStaticCache(t *testing.T) {
 		})
 	}
 
+	t.Run("cache and trie agree for a method without a route", func(t *testing.T) {
+		if !sameChain(r.Find("PUT", "/api/users").Handler, r.Search("PUT", "/api/users").Handler) {
+			t.Fatal("Find and Search disagree on a cache miss")
+		}
+	})
+
 	t.Run("param paths are not cached", func(t *testing.T) {
 		if slices.Contains(r.staticPaths, "/api/users/:id") {
 			t.Fatalf("param path should not be cached, staticPaths=%v", r.staticPaths)

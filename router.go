@@ -222,7 +222,7 @@ func (r *TrieRouter) Insert(method string, path string, handler HandlerFunction)
 	node.handlers[method] = handler
 
 	if newMethod {
-		// rbuild static
+		// rebuild static
 		r.rebuildStatic()
 	}
 	if isStatic {
