@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-const Version = "v0.2.12"
+const Version = "v0.2.13"
 
 type HandlerFunction func(*Context) error
 
@@ -164,6 +164,8 @@ func (n *NanoServe) Sub(prefix string, instance *NanoServe) *NanoServe {
 		ctx.handlers = match.Handler
 		ctx.Request.URL.Path = path
 		ctx.params = match.Params
+		ctx.handlerFound = match.HandlerFound
+		ctx.index = 0
 		// call child router's execute handler
 		executeHandlers(ctx, instance.ErrorHandler)
 		return nil

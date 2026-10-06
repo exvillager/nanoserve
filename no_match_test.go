@@ -60,3 +60,28 @@ func TestNoMatchReturns404WithoutMiddleware(t *testing.T) {
 		t.Fatalf("expected 404, got %d", w.Code)
 	}
 }
+
+func TestSubRouterNoMatchReturns404(t *testing.T) {
+	mw := func(c *Context) error { return c.Next() }
+
+	for _, parentUse := range []bool{false, true} {
+		sub := New()
+		sub.GET("/check", mw, func(c *Context) error { return c.String("ok") })
+		app := New()
+		if parentUse {
+			app.Use(mw)
+		}
+		app.Sub("/api/*", sub)
+
+		if w := serve(app, http.MethodPost, "/api/check"); w.Code != http.StatusNotFound {
+			t.Fatalf("parentUse=%v: wrong method expected 404, got %d", parentUse, w.Code)
+		}
+		if w := serve(app, http.MethodGet, "/api/nope"); w.Code != http.StatusNotFound {
+			t.Fatalf("parentUse=%v: unknown path expected 404, got %d", parentUse, w.Code)
+		}
+		w := serve(app, http.MethodGet, "/api/check")
+		if w.Code != http.StatusOK || w.Body.String() != "ok" {
+			t.Fatalf("parentUse=%v: expected 200 ok, got %d %q", parentUse, w.Code, w.Body.String())
+		}
+	}
+}
