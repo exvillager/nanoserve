@@ -31,6 +31,9 @@ type Router interface {
 type RouteMatch struct {
 	Handler []HandlerFunction
 	Params  Params
+	// HandlerFound is true when Handler ends with a real handler for the method (or ALL).
+	// When false, Handler holds only middleware, if any, and the request is a 404.
+	HandlerFound bool
 }
 
 // Our Node
@@ -292,7 +295,7 @@ func (r *TrieRouter) Find(method string, path string) *RouteMatch {
 				node = node.wildCardChild
 				break
 			} else {
-				return &RouteMatch{Params: params, Handler: collected}
+				return &RouteMatch{Params: params, Handler: collected, HandlerFound: false}
 			}
 
 			start = i + 1
@@ -312,7 +315,7 @@ func (r *TrieRouter) Find(method string, path string) *RouteMatch {
 			collected = append([]HandlerFunction{}, collected...)
 		}
 		collected = append(collected, handler)
-		return &RouteMatch{Params: params, Handler: collected}
+		return &RouteMatch{Params: params, Handler: collected, HandlerFound: true}
 	}
 	// if not then "ALL"
 	if handler := node.handlers["ALL"]; handler != nil {
@@ -320,10 +323,10 @@ func (r *TrieRouter) Find(method string, path string) *RouteMatch {
 			collected = append([]HandlerFunction{}, collected...)
 		}
 		collected = append(collected, handler)
-		return &RouteMatch{Params: params, Handler: collected}
+		return &RouteMatch{Params: params, Handler: collected, HandlerFound: true}
 	}
 
-	return &RouteMatch{Params: params, Handler: collected}
+	return &RouteMatch{Params: params, Handler: collected, HandlerFound: false}
 }
 
 // deprecated.
@@ -372,7 +375,7 @@ func (r *TrieRouter) Search(method string, path string) *RouteMatch {
 			node = child
 			break
 		} else {
-			return &RouteMatch{Params: params, Handler: collected}
+			return &RouteMatch{Params: params, Handler: collected, HandlerFound: false}
 		}
 	}
 	if len(node.middlewares) > 0 {
@@ -388,7 +391,7 @@ func (r *TrieRouter) Search(method string, path string) *RouteMatch {
 			collected = append([]HandlerFunction{}, collected...)
 		}
 		collected = append(collected, handler)
-		return &RouteMatch{Params: params, Handler: collected}
+		return &RouteMatch{Params: params, Handler: collected, HandlerFound: true}
 	}
 	// if not then "ALL"
 	if handler := node.handlers["ALL"]; handler != nil {
@@ -396,8 +399,8 @@ func (r *TrieRouter) Search(method string, path string) *RouteMatch {
 			collected = append([]HandlerFunction{}, collected...)
 		}
 		collected = append(collected, handler)
-		return &RouteMatch{Params: params, Handler: collected}
+		return &RouteMatch{Params: params, Handler: collected, HandlerFound: true}
 	}
 
-	return &RouteMatch{Params: params, Handler: collected}
+	return &RouteMatch{Params: params, Handler: collected, HandlerFound: false}
 }

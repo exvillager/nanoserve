@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-const Version = "v0.2.9"
+const Version = "v0.2.10"
 
 type HandlerFunction func(*Context) error
 
@@ -184,7 +184,6 @@ var contextPool = sync.Pool{
 // Our Main Handler which will handle the incoming request
 func (n *NanoServe) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	match := n.router.Find(r.Method, r.URL.Path)
-
 	c := contextPool.Get().(*Context)
 	c.resetWith(w, r, match)
 

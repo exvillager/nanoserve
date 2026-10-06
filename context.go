@@ -20,6 +20,8 @@ type Context struct {
 	handlers []HandlerFunction
 	index    int
 
+	handlerFound bool
+
 	contextData map[string]any
 	statusCode  int
 
@@ -35,6 +37,8 @@ func NewContext(w http.ResponseWriter, r *http.Request, matchedResult *RouteMatc
 		handlers: matchedResult.Handler,
 		params:   matchedResult.Params,
 		index:    0,
+
+		handlerFound: matchedResult.HandlerFound,
 	}
 }
 
@@ -45,6 +49,7 @@ func (c *Context) resetWith(w http.ResponseWriter, r *http.Request, matchedResul
 	c.handlers = matchedResult.Handler
 	c.params = matchedResult.Params
 	c.index = 0
+	c.handlerFound = matchedResult.HandlerFound
 	c.contextData = nil
 	c.statusCode = 0
 	c.abort = false
@@ -60,6 +65,9 @@ func (c *Context) Next() error {
 	}
 	c.index++
 	if c.index >= len(c.handlers) {
+		if !c.handlerFound {
+			http.NotFound(c.Writer, c.Request)
+		}
 		return nil
 	}
 	return c.handlers[c.index](c)
