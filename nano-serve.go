@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-const Version = "v0.2.10"
+const Version = "v0.2.12"
 
 type HandlerFunction func(*Context) error
 
